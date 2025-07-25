@@ -18,14 +18,14 @@ import torch
 # aln_n = n_all['arr_0'][:, 17] + k_all['arr_0'][:, 17] * 1j
 
 
-dfn = pd.read_excel('../data/n_AlN+W.xlsx')
-dfk = pd.read_excel('../data/k_AlN+W.xlsx')
+dfn = pd.read_excel('data/n_AlN+W.xlsx')
+dfk = pd.read_excel('data/k_AlN+W.xlsx')
 
 aln_n = (dfn['AlN']+1j*dfk['AlN']).to_numpy()
 w_n = (dfn['W']+1j*dfk['W']).to_numpy()
 
-n_short = np.load('../data/n_allHTMats.npz')
-k_short = np.load('../data/k_allHTMats.npz')
+n_short = np.load('data/n_allHTMats.npz')
+k_short = np.load('data/k_allHTMats.npz')
 
 cao_n = n_short['arr_0'][:, 4] + k_short['arr_0'][:, 4]
 mgo_n = n_short['arr_0'][:, 5] + k_short['arr_0'][:, 5]

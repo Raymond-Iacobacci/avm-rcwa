@@ -60,7 +60,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float, i):
         S.SetMaterial(Name='W',   Epsilon=(ff.w_n[i_wl+p+130]**2-1)+1)
         S.SetMaterial(Name='Vac', Epsilon=1)
         # S.SetMaterial(Name='AlN', Epsilon=(ff.cao_n[i_wl+p]**2-1)*i+1)
-        S.SetMaterial(Name='AlN', Epsilon=(ff.aln_n[i_wl+p+130]**2-1)*i+1)
+        S.SetMaterial(Name='AlN', Epsilon=(ff.w_n[i_wl+p+130]**2-1)*i+1)
 
 
         S.AddLayer(Name='VacuumAbove', Thickness=0.5, Material='Vac')

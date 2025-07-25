@@ -65,7 +65,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
         S.SetMaterial(Name='W',   Epsilon=ff.w_n[i_wl + p + 130]**2)
 
         S.SetMaterial(Name='Vac', Epsilon=1)
-        S.SetMaterial(Name='AlN', Epsilon=(ff.aln_n[i_wl + p+130]**2 - 1) * grating[0].item() + 1)
+        S.SetMaterial(Name='AlN', Epsilon=(ff.w_n[i_wl + p+130]**2 - 1) * grating[0].item() + 1)
 
         S.AddLayer(Name='VacuumAbove', Thickness=vac_depth, Material='Vac')
         S.AddLayer(Name='Grating', Thickness=depth, Material='Vac')
@@ -118,12 +118,15 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
             )
         )
         '''
-        delta_eps = ff.aln_n[i_wl+p+130] ** 2 - 1
+        delta_eps = ff.w_n[i_wl+p+130] ** 2 - 1
         delta_eps_r = torch.tensor(delta_eps.real, dtype=torch.float32)
+        # delta_eps_r = torch.tensor(np.real(ff.w_n[i_wl+p+130])**2-1)
         delta_eps_i = torch.tensor(delta_eps.imag, dtype=torch.float32)
+        # delta_eps_i = torch.tensor(np.imag(ff.w_n[i_wl+p+130])**2-1)
         phi = torch.einsum('ijkl,ijkl->ijk',
                            torch.as_tensor(fwd_meas),
-                           torch.as_tensor(pos_adj_meas))
+                        #    torch.conj(torch.as_tensor(pos_adj_meas)))
+                            torch.as_tensor(pos_adj_meas))
         grad_r = -k0 * torch.imag(phi) * delta_eps_r
         grad_i = +k0 * torch.real(phi) * delta_eps_i
         term = -k0 * torch.imag(
@@ -135,50 +138,10 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
         dflux[i_wl] = term.sum(dim=0).squeeze() * dz * L / n_x_pts
         dflux[i_wl] = dflux[i_wl] * (np.real(ff.w_n[i_wl + p+130])**2 - 1) # HERE IT IS!
 
-        dflux[i_wl] = (grad_r + grad_i).sum(dim=0) * dz * L / n_x_pts
+        dflux[i_wl] = (grad_r - grad_i).sum(dim=0) * dz * L / n_x_pts
 
-        if plot_fields:
-            z_space = np.linspace(0, 1+vac_depth + depth, 30)
-            fwd_vol = np.zeros((z_space.size, n_x_pts), complex)
-            adj_vol = np.zeros((z_space.size, n_x_pts), complex)
-            for iz, z in enumerate(z_space):
-                for ix, x in enumerate(x_space):
-                    fwd_vol[iz, ix] = S.GetFields(x, 0, z)[0][1]
-                    adj_vol[iz, ix] = S_adj.GetFields(x, 0, z)[0][1] + S_adj.GetFields(-x, 0, z)[0][1]
+        # dflux[i_wl] = (grad_i).sum(dim = 0) * dz * L / n_x_pts
 
-
-            # compute product of forward and adjoint fields
-            prod_vol = fwd_vol * (adj_vol)
-
-            fig, axs = plt.subplots(3, 2, figsize=(10, 12))
-            titles = [
-                f'Forward Real E-field {grating[0]}', f'Forward Imag E-field {vac_depth}',
-                'Adjoint Real E-field', 'Adjoint Imag E-field',
-                'Product Real (E·E_adj)', 'Product Imag (E·E_adj)'
-            ]
-            data_list = [
-                np.real(fwd_vol), np.imag(fwd_vol),
-                np.real(adj_vol), np.imag(adj_vol),
-                np.real(prod_vol), np.imag(prod_vol)
-            ]
-
-            for ax, title, data in zip(axs.ravel(), titles, data_list):
-                im = ax.imshow(
-                    data,
-                    extent=[x_space.min(), x_space.max(), z_space.max(), z_space.min()],
-                    aspect='auto'
-                )
-                ax.set_title(f'{title} {grating[0]}' if 'Forward' in title else title)
-                ax.set_xlabel('x (um)')
-                if 'Real' in title:
-                    ax.set_ylabel('z (um)')
-                # layer boundaries
-                ax.axhline(vac_depth, color='white', linestyle='--', linewidth=1)
-                ax.axhline(vac_depth + depth, color='white', linestyle='--', linewidth=1)
-                fig.colorbar(im, ax=ax)
-
-            plt.tight_layout()
-            plt.show()
 
         del S, S_adj
     # print(dflux/(ff.aln_n[0 + p + 130]**2 - 1) )
@@ -226,3 +189,50 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+'''
+        if plot_fields:
+            z_space = np.linspace(0, 1+vac_depth + depth, 30)
+            fwd_vol = np.zeros((z_space.size, n_x_pts), complex)
+            adj_vol = np.zeros((z_space.size, n_x_pts), complex)
+            for iz, z in enumerate(z_space):
+                for ix, x in enumerate(x_space):
+                    fwd_vol[iz, ix] = S.GetFields(x, 0, z)[0][1]
+                    adj_vol[iz, ix] = S_adj.GetFields(x, 0, z)[0][1] + S_adj.GetFields(-x, 0, z)[0][1]
+
+
+            # compute product of forward and adjoint fields
+            prod_vol = fwd_vol * (adj_vol)
+
+            fig, axs = plt.subplots(3, 2, figsize=(10, 12))
+            titles = [
+                f'Forward Real E-field {grating[0]}', f'Forward Imag E-field {vac_depth}',
+                'Adjoint Real E-field', 'Adjoint Imag E-field',
+                'Product Real (E·E_adj)', 'Product Imag (E·E_adj)'
+            ]
+            data_list = [
+                np.real(fwd_vol), np.imag(fwd_vol),
+                np.real(adj_vol), np.imag(adj_vol),
+                np.real(prod_vol), np.imag(prod_vol)
+            ]
+
+            for ax, title, data in zip(axs.ravel(), titles, data_list):
+                im = ax.imshow(
+                    data,
+                    extent=[x_space.min(), x_space.max(), z_space.max(), z_space.min()],
+                    aspect='auto'
+                )
+                ax.set_title(f'{title} {grating[0]}' if 'Forward' in title else title)
+                ax.set_xlabel('x (um)')
+                if 'Real' in title:
+                    ax.set_ylabel('z (um)')
+                # layer boundaries
+                ax.axhline(vac_depth, color='white', linestyle='--', linewidth=1)
+                ax.axhline(vac_depth + depth, color='white', linestyle='--', linewidth=1)
+                fig.colorbar(im, ax=ax)
+
+            plt.tight_layout()
+            plt.show()
+
+'''

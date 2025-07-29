@@ -101,7 +101,7 @@ def main():
     step = 0.01
     x_vals = []
     for i in np.arange(0, 1+step, step):
-        x_vals.append(gradient_per_image(torch.zeros(20), L=1., ang_pol=0, i=i))
+        x_vals.append(gradient_per_image(torch.zeros(20), L=1., ang_pol=45, i=i))
     x = np.array(x_vals)  # shape (1000,)
 
     # 2. compute the slope at each point:

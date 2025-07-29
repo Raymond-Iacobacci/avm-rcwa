@@ -35,12 +35,12 @@ class Generator(nn.Module):
 # --------------------------------------------------
 # Physics-based gradient + full-field sampling
 # --------------------------------------------------
-N = 5
+N = 5**2
 def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
                        plot_fields: bool = False):
     p = 20
     n_grating_elements = grating.shape[-1]
-    x_density = 30
+    x_density = 15
     n_x_pts = x_density * n_grating_elements
     n_y_pts = n_x_pts
     depth = 0.9
@@ -75,6 +75,8 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
         S.SetRegionRectangle(Layer = 'Grating', Material = 'AlN', Center = (L/2, L/2), Halfwidths = (L/4, L/2), Angle = 0)
         S.AddLayer(Name='Ab', Thickness=1.0, Material='W')
         S.SetFrequency(1.0 / wl)
+        Ss_adj = S.Clone()
+        Sp_adj = S.Clone()
         S.SetExcitationPlanewave((0, 0),
                                  sAmplitude=np.cos(ang_pol * np.pi/180),
                                  pAmplitude=np.sin(ang_pol * np.pi/180),
@@ -94,11 +96,9 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
         k0 = 2 * np.pi / wl.item()
         # S-polarization = y-polarization = 0-polarization
 
-        Ss_adj = S.Clone()
-        Sp_adj = S.Clone()
         basis = Ss_adj.GetBasisSet() # Removes the repeated calls
         propagating_harmonics = [ i for i in range(2*len(basis)) if 2*np.pi*basis[i % len(basis)][0] ** 2 + 2 * np.pi*basis[i % len(basis)][1] ** 2 <= k0 ** 2] # TODO: not extending for p-polarization
-        propagating_harmonics = [0, 2, 3]
+        # propagating_harmonics = [0, 2, 3]
         # print(f'Propagating harmonics:\n{propagating_harmonics}')
         # print(basis)
         s_excitations = []
@@ -112,36 +112,44 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
             if i < len(basis):
                 s_excitations.append((i + 1, b'y', corr_amp))
             else:
-                p_excitations.append((i + 1 - len(basis), b'x', corr_amp)) # TODO: change to mod len basis
+                p_excitations.append((i + 1 - len(basis), b'x', -corr_amp)) # TODO: change to mod len basis
         Ss_adj.SetExcitationExterior(tuple(s_excitations))
-        # Sp_adj.SetExcitationExterior(tuple(p_excitations))
+        Sp_adj.SetExcitationExterior(tuple(p_excitations))
 
-        adj_meas = np.zeros((z_meas.size, n_y_pts, n_x_pts, 3), complex)
+        s_adj_meas = np.zeros((z_meas.size, n_y_pts, n_x_pts, 3), complex)
+        p_adj_meas = np.zeros((z_meas.size, n_y_pts, n_x_pts, 3), complex)
         for iz, z in enumerate(z_meas):
             for iy, y in enumerate(y_space):
                 for ix, x in enumerate(x_space):
-                    # adj_meas[iz, iy, ix] = np.sqrt(np.array(Ss_adj.GetFields(x, y, z)[0]) ** 2 + np.array(Sp_adj.GetFields(x, y, z)[0]) ** 2) # NOTE: this gets the electric fields inside the medium for all 3 directions
-                    adj_meas[iz, iy, ix] = np.array(Ss_adj.GetFields(x, y, z)[0]) # NOTE: this gets the electric fields inside the medium for all 3 directions
+                    # adj_meas[iz, iy, ix] = (np.array(Ss_adj.GetFields(x, y, z)[0]) ** 2 + np.array(Sp_adj.GetFields(x, y, z)[0]) ** 2) # NOTE: this gets the electric fields inside the medium for all 3 directions
+                    s_adj_meas[iz, iy, ix] = np.array(Ss_adj.GetFields(x, y, z)[0])
+                    p_adj_meas[iz, iy, ix] = np.array(Sp_adj.GetFields(x, y, z)[0])
+                    # adj_meas[iz, iy, ix] = np.array(Ss_adj.GetFields(x, y, z)[0]) # NOTE: this gets the electric fields inside the medium for all 3 directions
+                    # print(np.sqrt(np.array(Ss_adj.GetFields(x, y, z)[0])**2).shape)
+                    # print(np.array(Ss_adj.GetFields(x, y, z)[0]).shape)
+                    # sys.exit(1)
+                    # print(np.array(Sp_adj.GetFields(x, y, z)[0]) ** 2)
 
-        # print(np.mean(adj_meas))
         delta_eps = ff.aln_n[i_wl + p + 130] ** 2 - 1
         delta_eps_r = torch.tensor(delta_eps.real, dtype=torch.float32)
         delta_eps_i = torch.tensor(delta_eps.imag, dtype=torch.float32)
-        phi = torch.einsum('ijkl,ijkl->ijk',
+
+        s_phi = torch.einsum('ijkl,ijkl->ijk',
                            torch.as_tensor(fwd_meas),
-                           torch.as_tensor(adj_meas)) # NOTE: just gets rid of the last dimension
-        # print(torch.mean(phi))
-        grad_r = -k0 * torch.imag(phi) * delta_eps_r
-        grad_i = +k0 * torch.real(phi) * delta_eps_i
+                           torch.as_tensor(s_adj_meas)) # NOTE: just gets rid of the last dimension
+        s_grad_r = -k0 * torch.imag(s_phi) * delta_eps_r
+        s_grad_i = +k0 * torch.real(s_phi) * delta_eps_i
         dz = (depth) / len(z_meas)
-        dflux[i_wl] = (grad_r - grad_i).sum(dim = 0)*dz * L / n_x_pts * L / n_y_pts
-        # print(torch.mean(grad_r.sum(dim = 0)))
-        # print(L/n_y_pts)
-        # print(torch.mean(dflux))
-        # print(torch.sum(dflux[0][:,7:22].real))
-        # print(n_y_pts,n_x_pts)
+        
+        p_phi = torch.einsum('ijkl,ijkl->ijk',
+                           torch.as_tensor(fwd_meas),
+                           torch.as_tensor(p_adj_meas)) # NOTE: just gets rid of the last dimension
+        p_grad_r = -k0 * torch.imag(p_phi) * delta_eps_r
+        p_grad_i = +k0 * torch.real(p_phi) * delta_eps_i
+
+        dflux[i_wl] = (s_grad_r - s_grad_i).sum(dim = 0)*dz * L / n_x_pts * L / n_y_pts + (p_grad_r - p_grad_i).sum(dim = 0)*dz * L / n_x_pts * L / n_y_pts
         del S, Ss_adj, Sp_adj
-    return torch.sum(dflux[0][:,7:22].real), power[0]
+    return torch.sum(dflux[0][:,4:11].real), power[0]
 
 # --------------------------------------------------
 # Main: scan & plot
@@ -153,7 +161,7 @@ def main():
     args = parser.parse_args()
 
     L = 1.
-    ang_pol = 0
+    ang_pol = 45
     step = 0.01
     jstep = 0.01
     i_vals = np.arange(0.0, 1.0 + step, step)

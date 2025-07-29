@@ -32,7 +32,7 @@ class Generator(nn.Module):
 # --------------------------------------------------
 # Physics-based gradient: computes dfom_deps and FOM diff
 # --------------------------------------------------
-n=1
+n=5**2
 def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float, i):
     p = 1480
     p = 20

@@ -35,7 +35,7 @@ class Generator(nn.Module):
 # --------------------------------------------------
 # Physics-based gradient + full-field sampling
 # --------------------------------------------------
-N = 5**2
+N = 3**2
 def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
                        plot_fields: bool = False):
     p = 20
@@ -47,7 +47,6 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
     vac_depth = 1.00
     z_meas = np.linspace(vac_depth, vac_depth + depth, 70)
     # measurement volume for gradient: within grating layer
-    # z_meas = z_space[(z_space >= vac_depth) & (z_space <= vac_depth + depth)]
     wavelengths = torch.linspace(0.35, 3.0, 2651)
     z_buf = 0. # irrespective to this in homogeneous case but...
 
@@ -92,9 +91,8 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
 
         (forw_amp, back_amp) = S.GetAmplitudes('VacuumAbove', zOffset=z_buf) # NOTE: to make individual excitations for each polarization (which for some reason is required by the 2D tests) we must be able to get individual amplitudes for each polarization -- thus, we must split the polarization across conjugate bases.
         # Further note: this implicitly converts it into the underlying xy cartesian plot coordinates.
-        # print(back_amp)
         k0 = 2 * np.pi / wl.item()
-        # S-polarization = y-polarization = 0-polarization
+        # NOTE: S-polarization = y-polarization = 0-polarization
 
         basis = Ss_adj.GetBasisSet() # Removes the repeated calls
         propagating_harmonics = [ i for i in range(2*len(basis)) if 2*np.pi*basis[i % len(basis)][0] ** 2 + 2 * np.pi*basis[i % len(basis)][1] ** 2 <= k0 ** 2] # TODO: not extending for p-polarization
@@ -121,14 +119,8 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
         for iz, z in enumerate(z_meas):
             for iy, y in enumerate(y_space):
                 for ix, x in enumerate(x_space):
-                    # adj_meas[iz, iy, ix] = (np.array(Ss_adj.GetFields(x, y, z)[0]) ** 2 + np.array(Sp_adj.GetFields(x, y, z)[0]) ** 2) # NOTE: this gets the electric fields inside the medium for all 3 directions
                     s_adj_meas[iz, iy, ix] = np.array(Ss_adj.GetFields(x, y, z)[0])
                     p_adj_meas[iz, iy, ix] = np.array(Sp_adj.GetFields(x, y, z)[0])
-                    # adj_meas[iz, iy, ix] = np.array(Ss_adj.GetFields(x, y, z)[0]) # NOTE: this gets the electric fields inside the medium for all 3 directions
-                    # print(np.sqrt(np.array(Ss_adj.GetFields(x, y, z)[0])**2).shape)
-                    # print(np.array(Ss_adj.GetFields(x, y, z)[0]).shape)
-                    # sys.exit(1)
-                    # print(np.array(Sp_adj.GetFields(x, y, z)[0]) ** 2)
 
         delta_eps = ff.aln_n[i_wl + p + 130] ** 2 - 1
         delta_eps_r = torch.tensor(delta_eps.real, dtype=torch.float32)
@@ -161,7 +153,7 @@ def main():
     args = parser.parse_args()
 
     L = 1.
-    ang_pol = 45
+    ang_pol = 90
     step = 0.01
     jstep = 0.01
     i_vals = np.arange(0.0, 1.0 + step, step)

@@ -32,7 +32,7 @@ class Generator(nn.Module):
 # --------------------------------------------------
 # Physics-based gradient: computes dfom_deps and FOM diff
 # --------------------------------------------------
-n=9
+n=1
 def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float, i):
     p = 1480
     p = 20
@@ -102,7 +102,7 @@ def main():
     step = 0.01
     x_vals = []
     for i in np.arange(0, 1+step, step):
-        x_vals.append(gradient_per_image(torch.zeros(20), L=1., ang_pol=0, i=i))
+        x_vals.append(gradient_per_image(torch.zeros(20), L=1., ang_pol=90, i=i))
     x = np.array(x_vals)  # shape (1000,)
 
     # 2. compute the slope at each point:

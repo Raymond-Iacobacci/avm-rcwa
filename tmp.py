@@ -32,7 +32,7 @@ class Generator(nn.Module):
 # --------------------------------------------------
 # Physics-based gradient: computes dfom_deps and FOM diff
 # --------------------------------------------------
-n=15
+n=3
 def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float, i):
     p = 1480
     p = 20
@@ -60,7 +60,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float, i):
         S.SetMaterial(Name='W',   Epsilon=(ff.w_n[i_wl+p+130]**2-1)+1)
         S.SetMaterial(Name='Vac', Epsilon=1)
         # S.SetMaterial(Name='AlN', Epsilon=(ff.cao_n[i_wl+p]**2-1)*i+1)
-        S.SetMaterial(Name='AlN', Epsilon=(ff.w_n[i_wl+p+130]**2-1)*i+1)
+        S.SetMaterial(Name='AlN', Epsilon=(ff.aln_n[i_wl+p+130]**2-1)*i+1)
 
 
         S.AddLayer(Name='VacuumAbove', Thickness=0.5, Material='Vac')
@@ -127,7 +127,8 @@ def main():
     plt.xlabel("step index")
     plt.ylabel("slope")
     plt.legend()
-    np.save(f'slope{n}.npy', slopes)
+    # np.save(f'slope{n}.npy', slopes)
+    np.save(f'slope5.npy', slopes)
 
     plt.tight_layout()
     plt.show()

@@ -35,7 +35,7 @@ class Generator(nn.Module):
 # --------------------------------------------------
 # Physics-based gradient + full-field sampling
 # --------------------------------------------------
-N = 9
+N = 5
 def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
                        plot_fields: bool = False):
     p = 20
@@ -44,7 +44,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
     n_x_pts = x_density * n_grating_elements
     n_y_pts = n_x_pts
     depth = 0.9
-    vac_depth = 0.00
+    vac_depth = 1.00
     z_meas = np.linspace(vac_depth, vac_depth + depth, 70)
     # measurement volume for gradient: within grating layer
     # z_meas = z_space[(z_space >= vac_depth) & (z_space <= vac_depth + depth)]
@@ -72,7 +72,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
 
         S.AddLayer(Name='VacuumAbove', Thickness=vac_depth, Material='Vac')
         S.AddLayer(Name='Grating', Thickness=depth, Material='Vac')
-        S.SetRegionRectangle(Layer = 'Grating', Material = 'AlN', Center = (L/2, L/2), Halfwidths = (L/4, L/4), Angle = 0)
+        S.SetRegionRectangle(Layer = 'Grating', Material = 'AlN', Center = (L/2, L/2), Halfwidths = (L/4, L/2), Angle = 0)
         S.AddLayer(Name='Ab', Thickness=1.0, Material='W')
         S.SetFrequency(1.0 / wl)
         S.SetExcitationPlanewave((0, 0),
@@ -88,98 +88,60 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
                 for ix, x in enumerate(x_space):
                     fwd_meas[iz, iy, ix] = S.GetFields(x, y, z)[0] # [0] gets the electric field
 
-        (forw_amp, back_amp) = S.GetAmplitudes('VacuumAbove', zOffset=z_buf)
-        print(f"Back amplitudes with polarization {ang_pol}:")
-        for i in back_amp:
-            print(i)
-        print("Max amp:")
-        print(np.max(np.abs(back_amp)))
+        (forw_amp, back_amp) = S.GetAmplitudes('VacuumAbove', zOffset=z_buf) # NOTE: to make individual excitations for each polarization (which for some reason is required by the 2D tests) we must be able to get individual amplitudes for each polarization -- thus, we must split the polarization across conjugate bases.
+        # Further note: this implicitly converts it into the underlying xy cartesian plot coordinates.
+        # print(back_amp)
+        k0 = 2 * np.pi / wl.item()
+        # S-polarization = y-polarization = 0-polarization
 
-        k0 = 2 * np.pi / wl.item()
-        S_adj = S.Clone()
-        basis = S_adj.GetBasisSet() # Removes the repeated calls
-        print("Basis")
-        print(basis)
-        
-        pos_harmonics = [ i for i in range(len(basis)) if basis[i][0] > 0 and abs(2*np.pi*basis[i][0]/L) <= k0]
-        neg_harmonics = [ i for i in range(len(basis)) if basis[i][0] <= 0 and abs(2*np.pi*basis[i][0]/L) <= k0]
-        k0 = 2 * np.pi / wl.item()
-        excitations = []
+        Ss_adj = S.Clone()
+        Sp_adj = S.Clone()
+        basis = Ss_adj.GetBasisSet() # Removes the repeated calls
+        propagating_harmonics = [ i for i in range(2*len(basis)) if 2*np.pi*basis[i % len(basis)][0] ** 2 + 2 * np.pi*basis[i % len(basis)][1] ** 2 <= k0 ** 2] # TODO: not extending for p-polarization
+        propagating_harmonics = [0, 2, 3]
+        # print(f'Propagating harmonics:\n{propagating_harmonics}')
+        # print(basis)
+        s_excitations = []
+        p_excitations = []
+        # print(len(basis))
         for i, raw_amp in enumerate(back_amp):
-            if i not in pos_harmonics and i not in neg_harmonics:
+            # print(i<len(basis))
+            if i not in propagating_harmonics:
                 continue
             corr_amp = complex(np.exp(-1j * k0 * z_buf) * np.conj(raw_amp))
-            if i in pos_harmonics:
-                excitations.append((2*basis[i][0], b'y', corr_amp))
-            if i in neg_harmonics:
-                excitations.append((-2*basis[i][0]+1, b'y', corr_amp))
-        S_adj.SetExcitationExterior(tuple(excitations))
+            if i < len(basis):
+                s_excitations.append((i + 1, b'y', corr_amp))
+            else:
+                p_excitations.append((i + 1 - len(basis), b'x', corr_amp)) # TODO: change to mod len basis
+        Ss_adj.SetExcitationExterior(tuple(s_excitations))
+        # Sp_adj.SetExcitationExterior(tuple(p_excitations))
 
-        pos_adj_meas = np.zeros((z_meas.size, n_y_pts, n_x_pts, 3), complex)
+        adj_meas = np.zeros((z_meas.size, n_y_pts, n_x_pts, 3), complex)
         for iz, z in enumerate(z_meas):
             for iy, y in enumerate(y_space):
                 for ix, x in enumerate(x_space):
-                    pos_adj_meas[iz, iy, ix] = S_adj.GetFields(x, y, z)[0]
+                    # adj_meas[iz, iy, ix] = np.sqrt(np.array(Ss_adj.GetFields(x, y, z)[0]) ** 2 + np.array(Sp_adj.GetFields(x, y, z)[0]) ** 2) # NOTE: this gets the electric fields inside the medium for all 3 directions
+                    adj_meas[iz, iy, ix] = np.array(Ss_adj.GetFields(x, y, z)[0]) # NOTE: this gets the electric fields inside the medium for all 3 directions
 
-        term = -k0 * torch.imag(
-            torch.einsum('ijkl,ijkl->ijk',
-                         torch.as_tensor(fwd_meas),
-                         torch.as_tensor(pos_adj_meas)) # This rotation factor is equivalent to taking the -imaginary value of the system
-        )
+        # print(np.mean(adj_meas))
+        delta_eps = ff.aln_n[i_wl + p + 130] ** 2 - 1
+        delta_eps_r = torch.tensor(delta_eps.real, dtype=torch.float32)
+        delta_eps_i = torch.tensor(delta_eps.imag, dtype=torch.float32)
+        phi = torch.einsum('ijkl,ijkl->ijk',
+                           torch.as_tensor(fwd_meas),
+                           torch.as_tensor(adj_meas)) # NOTE: just gets rid of the last dimension
+        # print(torch.mean(phi))
+        grad_r = -k0 * torch.imag(phi) * delta_eps_r
+        grad_i = +k0 * torch.real(phi) * delta_eps_i
         dz = (depth) / len(z_meas)
-        print(fwd_meas.shape)
-        print(term.shape)
-        dflux[i_wl] = term.sum(dim=0).squeeze() * dz * L / n_x_pts * L / n_y_pts # Takes away the height dimension and corrects for the xy-spacing
-        dflux[i_wl] = dflux[i_wl] * (ff.aln_n[i_wl + p+130]**2 - 1) # HERE IT IS!
-
-        if plot_fields:
-            z_space = np.linspace(0, 1+vac_depth + depth, 30)
-            fwd_vol = np.zeros((z_space.size, n_x_pts), complex)
-            adj_vol = np.zeros((z_space.size, n_x_pts), complex)
-            for iz, z in enumerate(z_space):
-                for ix, x in enumerate(x_space):
-                    fwd_vol[iz, ix] = S.GetFields(x, 0, z)[0][1]
-                    adj_vol[iz, ix] = S_adj.GetFields(x, 0, z)[0][1] + S_adj.GetFields(-x, 0, z)[0][1]
-
-
-            # compute product of forward and adjoint fields
-            prod_vol = fwd_vol * (adj_vol)
-
-            fig, axs = plt.subplots(3, 2, figsize=(10, 12))
-            titles = [
-                f'Forward Real E-field {grating[0]}', f'Forward Imag E-field {vac_depth}',
-                'Adjoint Real E-field', 'Adjoint Imag E-field',
-                'Product Real (E·E_adj)', 'Product Imag (E·E_adj)'
-            ]
-            data_list = [
-                np.real(fwd_vol), np.imag(fwd_vol),
-                np.real(adj_vol), np.imag(adj_vol),
-                np.real(prod_vol), np.imag(prod_vol)
-            ]
-
-            for ax, title, data in zip(axs.ravel(), titles, data_list):
-                im = ax.imshow(
-                    data,
-                    extent=[x_space.min(), x_space.max(), z_space.max(), z_space.min()],
-                    aspect='auto'
-                )
-                ax.set_title(f'{title} {grating[0]}' if 'Forward' in title else title)
-                ax.set_xlabel('x (um)')
-                if 'Real' in title:
-                    ax.set_ylabel('z (um)')
-                # layer boundaries
-                ax.axhline(vac_depth, color='white', linestyle='--', linewidth=1)
-                ax.axhline(vac_depth + depth, color='white', linestyle='--', linewidth=1)
-                fig.colorbar(im, ax=ax)
-
-            plt.tight_layout()
-            plt.show()
-
-        del S, S_adj
-    # print(dflux/(ff.aln_n[0 + p + 130]**2 - 1) )
-    # print(f'Dflux shape: {dflux.shape}')
-    sys.exit(1)
-    return (torch.sum(dflux[0][7:22])), power[0] # 8, 21
+        dflux[i_wl] = (grad_r - grad_i).sum(dim = 0)*dz * L / n_x_pts * L / n_y_pts
+        # print(torch.mean(grad_r.sum(dim = 0)))
+        # print(L/n_y_pts)
+        # print(torch.mean(dflux))
+        # print(torch.sum(dflux[0][:,7:22].real))
+        # print(n_y_pts,n_x_pts)
+        del S, Ss_adj, Sp_adj
+    return torch.sum(dflux[0][:,7:22].real), power[0]
 
 # --------------------------------------------------
 # Main: scan & plot
@@ -191,12 +153,14 @@ def main():
     args = parser.parse_args()
 
     L = 1.
-    ang_pol = 90
+    ang_pol = 0
     step = 0.01
+    jstep = 0.01
     i_vals = np.arange(0.0, 1.0 + step, step)
+    j_vals = np.arange(0.0, 1.0 + jstep, jstep)
     grad_vals = []
     P=[]
-    for val in tqdm(i_vals, desc="Scanning gradient"):
+    for val in tqdm(j_vals, desc="Scanning gradient"):
         # print(val)
         g = torch.tensor([val], dtype=torch.float32)
         dflux, P1 = gradient_per_image(g, L, ang_pol, plot_fields=args.plot_fields)
@@ -209,7 +173,7 @@ def main():
     plt.show()
     correct_slopes = np.load(f'slope{N}.npy')
     plt.figure(figsize=(6, 4))
-    plt.plot(i_vals, grad_vals, label = 'Calculated slopes', lw=2)
+    plt.plot(j_vals, grad_vals, label = 'Calculated slopes', lw=2)
     plt.plot(i_vals, correct_slopes, label = 'Correct slopes', lw = 2)
     plt.legend()
     plt.xlabel('Grating amplitude')
@@ -217,7 +181,7 @@ def main():
     plt.title('Gradient of FOM vs. Grating Amplitude')
     plt.grid(True)
     plt.show()
-    np.save(f'computed_slope{N}.npy', grad_vals)
+    # np.save(f'computed_slope{N}.npy', grad_vals)
 
     print(np.max(np.abs(correct_slopes[1:-1] - grad_vals[1:-1])))
     print(correct_slopes[10] , grad_vals[10])

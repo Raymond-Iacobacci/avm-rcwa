@@ -35,7 +35,7 @@ class Generator(nn.Module):
 # --------------------------------------------------
 # Physics-based gradient + full-field sampling
 # --------------------------------------------------
-N = 15
+N = 3
 def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
                        plot_fields: bool = False):
     p = 20
@@ -65,7 +65,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
         S.SetMaterial(Name='W',   Epsilon=ff.w_n[i_wl + p + 130]**2)
 
         S.SetMaterial(Name='Vac', Epsilon=1)
-        S.SetMaterial(Name='AlN', Epsilon=(ff.w_n[i_wl + p+130]**2 - 1) * grating[0].item() + 1)
+        S.SetMaterial(Name='AlN', Epsilon=(ff.aln_n[i_wl + p+130]**2 - 1) * grating[0].item() + 1)
 
         S.AddLayer(Name='VacuumAbove', Thickness=vac_depth, Material='Vac')
         S.AddLayer(Name='Grating', Thickness=depth, Material='Vac')
@@ -85,12 +85,11 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
                 fwd_meas[iz, 0, ix] = S.GetFields(x, 0, z)[0]
 
         (forw_amp, back_amp) = S.GetAmplitudes('VacuumAbove', zOffset=z_buf)
-
+        # print(back_amp)
         k0 = 2 * np.pi / wl.item()
         S_adj = S.Clone()
         basis = S_adj.GetBasisSet() # Removes the repeated calls
-        
-        pos_harmonics = [ i for i in range(len(basis)) if basis[i][0] > 0 and abs(2*np.pi*basis[i][0]/L) <= k0]
+        pos_harmonics = [ i for i in range(len(basis)) if basis[i][0] > 0 and abs(2*np.pi*basis[i][0]/L) <= k0] # NOTE: this forces the system to work on far-fields only. Evanescent waves are discarded.
         neg_harmonics = [ i for i in range(len(basis)) if basis[i][0] <= 0 and abs(2*np.pi*basis[i][0]/L) <= k0]
         k0 = 2 * np.pi / wl.item()
         excitations = []
@@ -103,7 +102,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
             if i in neg_harmonics:
                 excitations.append((-2*basis[i][0]+1, b'y', corr_amp))
         S_adj.SetExcitationExterior(tuple(excitations))
-
+        # print(excitations)
         pos_adj_meas = np.zeros((z_meas.size, 1, n_x_pts, 3), complex)
         for iz, z in enumerate(z_meas):
             for ix, x in enumerate(x_space):
@@ -118,34 +117,22 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
             )
         )
         '''
-        delta_eps = ff.w_n[i_wl+p+130] ** 2 - 1
+        # print(np.mean(pos_adj_meas))
+        delta_eps = ff.aln_n[i_wl+p+130] ** 2 - 1
         delta_eps_r = torch.tensor(delta_eps.real, dtype=torch.float32)
-        # delta_eps_r = torch.tensor(np.real(ff.w_n[i_wl+p+130])**2-1)
         delta_eps_i = torch.tensor(delta_eps.imag, dtype=torch.float32)
-        # delta_eps_i = torch.tensor(np.imag(ff.w_n[i_wl+p+130])**2-1)
         phi = torch.einsum('ijkl,ijkl->ijk',
                            torch.as_tensor(fwd_meas),
-                        #    torch.conj(torch.as_tensor(pos_adj_meas)))
                             torch.as_tensor(pos_adj_meas))
+        # print(torch.mean(phi))
         grad_r = -k0 * torch.imag(phi) * delta_eps_r
         grad_i = +k0 * torch.real(phi) * delta_eps_i
-        term = -k0 * torch.imag(
-            torch.einsum('ijkl,ijkl->ijk',
-                         torch.as_tensor(fwd_meas),
-                         torch.as_tensor(pos_adj_meas)) # This rotation factor is equivalent to taking the -imaginary value of the system
-        ) # Handle the summing term -- we should do L2 norm instead
         dz = (depth) / len(z_meas)
-        dflux[i_wl] = term.sum(dim=0).squeeze() * dz * L / n_x_pts
-        dflux[i_wl] = dflux[i_wl] * (np.real(ff.w_n[i_wl + p+130])**2 - 1) # HERE IT IS!
-
+        # print(torch.mean(grad_r.sum(dim = 0)))
         dflux[i_wl] = (grad_r - grad_i).sum(dim=0) * dz * L / n_x_pts
-
-        # dflux[i_wl] = (grad_i).sum(dim = 0) * dz * L / n_x_pts
-
-
+        # print(torch.mean(dflux)*L/n_x_pts)
+        # print(torch.sum(dflux[0][7:22]).real)
         del S, S_adj
-    # print(dflux/(ff.aln_n[0 + p + 130]**2 - 1) )
-    # print(f'Dflux shape: {dflux.shape}')
     return (torch.sum(dflux[0][7:22]).real), power[0] # 8, 21
 
 # --------------------------------------------------
@@ -181,7 +168,8 @@ def main():
     plt.title(r'$\frac{\partial\text{eff}}{\partial\text{comp ratio}}$ vs comp ratio @ $n_\text{harm}=$'+f'{int((N+1)/2)}',fontsize=20)
     plt.grid(True)
     plt.show()
-    np.save(f'computed_slope{N}.npy', grad_vals)
+    # np.save(f'computed_slope{N}.npy', grad_vals)
+    # np.save('computed_slope5.npy', grad_vals)
 
     print(np.max(np.abs(correct_slopes[1:-1] - grad_vals[1:-1])))
     print(correct_slopes[10] , grad_vals[10])

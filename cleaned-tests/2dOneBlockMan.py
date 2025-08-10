@@ -27,7 +27,7 @@ def reflected_power(mix_ratio, period, ang_pol, n_harm, wl):
 
     S.AddLayer(Name='VacuumAbove', Thickness=0.5, Material='Vac')
     S.AddLayer(Name='Grating',      Thickness=depth, Material='Vac')
-    S.SetRegionRectangle(Layer = 'Grating', Material = 'AlN', Center = (period/2, period/2), Halfwidths = (period/4, period/2), Angle = 0)
+    S.SetRegionRectangle(Layer = 'Grating', Material = 'AlN', Center = (period/2, period/2), Halfwidths = (period/4, period/5), Angle = 0)
     S.AddLayer(Name='VacuumBelow', Thickness=1, Material='W')
     S.SetFrequency(1.0 / wl)
 
@@ -38,10 +38,35 @@ def reflected_power(mix_ratio, period, ang_pol, n_harm, wl):
 emission = []
 period = 1.
 ang_pol = 90
-n_harm = 5**2
+n_harm = 5
 wavelength = .370
 mix_ratios = np.linspace(0, 1, 100)
 for mix_ratio in mix_ratios:
     emission.append(reflected_power(mix_ratio, period, ang_pol, n_harm, wavelength))
-plt.plot(mix_ratios, emission)
+
+emission = np.array(emission)
+dx = mix_ratios[1] - mix_ratios[0]
+slopes = np.gradient(emission, dx)
+
+# (optional) save slopes to file, similar to your second script
+np.save("fom_slopes.npy", slopes)
+
+# Plot FOM (left) and gradient (right)
+plt.figure(figsize=(8, 4))
+
+plt.subplot(1, 2, 1)
+plt.plot(mix_ratios, emission, label="FOM(mix_ratio)")
+plt.title("FOM vs mix_ratio")
+plt.xlabel("mix_ratio")
+plt.ylabel("Reflected power")
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(mix_ratios, slopes, label="dFOM/d(mix_ratio)")
+plt.title("Gradient of FOM")
+plt.xlabel("mix_ratio")
+plt.ylabel("slope")
+plt.legend()
+
+plt.tight_layout()
 plt.show()

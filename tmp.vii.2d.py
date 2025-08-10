@@ -35,7 +35,7 @@ class Generator(nn.Module):
 # --------------------------------------------------
 # Physics-based gradient + full-field sampling
 # --------------------------------------------------
-N = 3**2
+N = 5**2
 def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
                        plot_fields: bool = False):
     p = 20
@@ -45,7 +45,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
     n_y_pts = n_x_pts
     depth = 0.9
     vac_depth = 1.00
-    z_meas = np.linspace(vac_depth, vac_depth + depth, 70)
+    z_meas = np.linspace(vac_depth, vac_depth + depth, 30)
     # measurement volume for gradient: within grating layer
     wavelengths = torch.linspace(0.35, 3.0, 2651)
     z_buf = 0. # irrespective to this in homogeneous case but...
@@ -56,13 +56,8 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
         st = np.arange(n_cells)[:, None]
         return ((st + fr) * dx).ravel()
 
-    x_space = make_grid(L, n_cells=15, k=2)
+    x_space = make_grid(L, n_cells=x_density, k=n_grating_elements)
     y_space = x_space.copy()
-    print(x_space)
-    print(n_grating_elements)
-    plt.plot(x_space)
-    plt.show()
-    sys.exit(1)
 
     dflux = torch.zeros((2, n_y_pts, n_x_pts))
     power = []
@@ -70,6 +65,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
         # S = S4.New(Lattice=L, NumBasis=N)
         S = S4.New(Lattice=((L, 0), (0, L)), NumBasis=N)
         S.SetMaterial(Name='W',   Epsilon=ff.w_n[i_wl + p + 130]**2)
+        # print(i_wl,p)
 
         S.SetMaterial(Name='Vac', Epsilon=1)
         S.SetMaterial(Name='AlN', Epsilon=(ff.aln_n[i_wl + p+130]**2 - 1) * grating[0].item() + 1)
@@ -118,6 +114,7 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
                 p_excitations.append((i + 1 - len(basis), b'x', -corr_amp)) # TODO: change to mod len basis
         Ss_adj.SetExcitationExterior(tuple(s_excitations))
         Sp_adj.SetExcitationExterior(tuple(p_excitations))
+        # print(p_excitations)
 
         s_adj_meas = np.zeros((z_meas.size, n_y_pts, n_x_pts, 3), complex)
         p_adj_meas = np.zeros((z_meas.size, n_y_pts, n_x_pts, 3), complex)
@@ -146,6 +143,9 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
 
         dflux[i_wl] = (s_grad_r - s_grad_i).sum(dim = 0)*dz * L / n_x_pts * L / n_y_pts + (p_grad_r - p_grad_i).sum(dim = 0)*dz * L / n_x_pts * L / n_y_pts
         del S, Ss_adj, Sp_adj
+    # print(dflux[0].shape)
+    # print(dflux[0])
+    # sys.exit(1)
     return torch.sum(dflux[0][:,4:11].real), power[0]
 
 # --------------------------------------------------

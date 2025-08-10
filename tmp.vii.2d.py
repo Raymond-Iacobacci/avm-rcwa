@@ -56,8 +56,13 @@ def gradient_per_image(grating: torch.Tensor, L: float, ang_pol: float,
         st = np.arange(n_cells)[:, None]
         return ((st + fr) * dx).ravel()
 
-    x_space = make_grid(L, n_cells=x_density, k=n_grating_elements)
+    x_space = make_grid(L, n_cells=15, k=2)
     y_space = x_space.copy()
+    print(x_space)
+    print(n_grating_elements)
+    plt.plot(x_space)
+    plt.show()
+    sys.exit(1)
 
     dflux = torch.zeros((2, n_y_pts, n_x_pts))
     power = []

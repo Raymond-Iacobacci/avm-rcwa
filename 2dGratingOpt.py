@@ -11,7 +11,7 @@ from tqdm import tqdm
 import ff
 
 wavelengths = np.linspace(.35, 3, 2651)
-n_harm = 5
+n_harm = 13
 
 def rect_mask(period, xy_points, center, halfwidths, angle=0.0, wrap=False):
     """
@@ -57,8 +57,14 @@ def sum_inside_rect(grad_map_2d, period, xy_points, center, halfwidths, angle=0.
     g = torch.as_tensor(grad_map_2d).real
     return (g[mask] * cell_area).sum()
 
-def grad_array(mix_ratio, period, ang_pol, n_harm, wl, xy_points = 1, z_points = 1):
+def grad_array(mix_ratio, period, ang_pol, n_harm, wl, xy_points = 1, z_points = 1, tiles_per_side=2):
+    """
+    If mix_ratio is scalar, uses a uniform mix everywhere the AlN features exist.
+    If mix_ratio is 2x2-like (list/array), assigns a distinct mix to each of the 4 squares.
+    Returns a tensor of 4 gradient sums (one per square, row-major: y then x).
+    """
     assert n_harm%2 == 1
+    n=int(tiles_per_side)
 
     i_wl = np.where(wavelengths == wl)
     assert len(i_wl) == 1
@@ -72,15 +78,49 @@ def grad_array(mix_ratio, period, ang_pol, n_harm, wl, xy_points = 1, z_points =
     s = S4.New(Lattice = ((period, 0), (0, period)), NumBasis = n_harm**2)
     s.SetMaterial(Name='W',   Epsilon=ff.w_n[i_wl+130]**2)
     s.SetMaterial(Name='Vac', Epsilon=1)
-    s.SetMaterial(Name='AlN', Epsilon=(ff.aln_n[i_wl+130]**2-1)*mix_ratio+1)
+
+    # normalize mix_grid into (n,n) and clamp to [0,1]
+    mix_grid = np.asarray(mix_ratio, dtype=float)
+    if mix_grid.ndim == 0:
+        mix_grid = np.full((n, n), float(mix_grid))
+    elif mix_grid.ndim == 1:
+        assert mix_grid.size == n*n, f"Expected {n*n} mix values, got {mix_grid.size}"
+        mix_grid = mix_grid.reshape(n, n)  # row-major: [g00, g01, ...] -> [[row0...],[row1...],...]
+    else:
+        mix_grid = mix_grid.reshape(n, n)
+    np.clip(mix_grid, 0.0, 1.0, out=mix_grid)
+
+    # materials per square: eps = 1 + mix * (eps_AlN - 1)
+    aln_eps = ff.aln_n[i_wl+130]**2
+    delta_eps = aln_eps - 1
+    for iy in range(n):
+        for ix in range(n):
+            eps_here = 1 + mix_grid[iy, ix] * delta_eps
+            s.SetMaterial(Name=f'AlN_{iy}_{ix}', Epsilon=eps_here)
 
     s.AddLayer(Name='VacuumAbove', Thickness=vac_depth, Material='Vac')
     s.AddLayer(Name='Grating',      Thickness=depth, Material='Vac')
-    center = (period / 2, period / 2)
-    halfwidths = (period / 4, period / 5)
-    angle = 0
-    s.SetRegionRectangle(Layer = 'Grating', Material = 'AlN', Center = center, Halfwidths = halfwidths, Angle = angle)
+
+    # --- geometry: n×n tiling over the unit cell ---
+    # centers at (ix+0.5)/n * period, (iy+0.5)/n * period; halfwidths = period/(2n)
+    hw = period / (2*n)
+    halfwidths = (hw, hw)
+    centers = []
+    for iy in range(n):
+        cy = (iy + 0.5) * (period / n)
+        for ix in range(n):
+            cx = (ix + 0.5) * (period / n)
+            centers.append(((cx, cy), iy, ix))
+            s.SetRegionRectangle(Layer='Grating', Material=f'AlN_{iy}_{ix}',
+                                 Center=(cx, cy), Halfwidths=halfwidths, Angle=0.0)
+
+    # Precompute delta eps (per 1.0 increment in mix)
+    aln_eps = ff.aln_n[i_wl+130]**2
+    delta_eps = aln_eps - 1
+
+    # Homogeneous W "substrate" (thick enough region beneath)
     s.AddLayer(Name='VacuumBelow', Thickness=1, Material='W')
+
     s.SetFrequency(1.0 / wl)
     ss_adj = s.Clone()
     sp_adj = s.Clone()
@@ -99,10 +139,11 @@ def grad_array(mix_ratio, period, ang_pol, n_harm, wl, xy_points = 1, z_points =
         )  # returns shape (2*nx, 2*ny, 3)
         e2 = np.asarray(e2)
         # pick midpoints: (2i+1, 2j+1) -> (i+0.5)/n, (j+0.5)/n
-        e_mid = e2[1::2, 1::2, :]                   # shape (nx, ny, 3) if you want (x,y,3)
+        e_mid = e2[1::2, 1::2, :]                   # shape (nx, ny, 3)
         fwd_meas[iz] = e_mid
     
     fwd_back_amp = s.GetAmplitudes('VacuumAbove', zOffset=0)[1]
+    r = np.abs(s.GetPowerFlux('VacuumAbove', zOffset=0)[1])
     propagating_harmonics = [ i for i in range(2*len(basis)) if (2*np.pi*basis[i % len(basis)][0]/period) ** 2 + (2 * np.pi*basis[i % len(basis)][1]/period) ** 2 <= k0 ** 2] # TODO: not extending for p-polarization
 
     s_excitations = []
@@ -129,8 +170,7 @@ def grad_array(mix_ratio, period, ang_pol, n_harm, wl, xy_points = 1, z_points =
             Format='Array'
         )  # returns shape (2*nx, 2*ny, 3)
         e2 = np.asarray(e2)
-        # pick midpoints: (2i+1, 2j+1) -> (i+0.5)/n, (j+0.5)/n
-        e_mid = e2[1::2, 1::2, :]                   # shape (nx, ny, 3) if you want (x,y,3)
+        e_mid = e2[1::2, 1::2, :]
         s_adj_meas[iz] = e_mid
 
         e2, _ = sp_adj.GetFieldsOnGrid(
@@ -139,11 +179,11 @@ def grad_array(mix_ratio, period, ang_pol, n_harm, wl, xy_points = 1, z_points =
             Format='Array'
         )  # returns shape (2*nx, 2*ny, 3)
         e2 = np.asarray(e2)
-        # pick midpoints: (2i+1, 2j+1) -> (i+0.5)/n, (j+0.5)/n
-        e_mid = e2[1::2, 1::2, :]                   # shape (nx, ny, 3) if you want (x,y,3)
+        e_mid = e2[1::2, 1::2, :]
         p_adj_meas[iz] = e_mid
 
-    delta_eps = ff.aln_n[i_wl+130] ** 2 - 1
+    # NOTE: For the gradient *with respect to each square's mixing coefficient*,
+    # the local density uses delta_eps from AlN relative to vacuum.
     delta_eps_r = torch.tensor(delta_eps.real, dtype=torch.float32)
     delta_eps_i = torch.tensor(delta_eps.imag, dtype=torch.float32)
 
@@ -151,34 +191,50 @@ def grad_array(mix_ratio, period, ang_pol, n_harm, wl, xy_points = 1, z_points =
 
     s_phi = torch.einsum('ijkl,ijkl->ijk',
                         torch.as_tensor(fwd_meas),
-                        torch.as_tensor(s_adj_meas)) # NOTE: just gets rid of the last dimension
+                        torch.as_tensor(s_adj_meas)) # summed over field components
     s_grad_r = -k0 * torch.imag(s_phi) * delta_eps_r
     s_grad_i = +k0 * torch.real(s_phi) * delta_eps_i
 
     p_phi = torch.einsum('ijkl,ijkl->ijk',
                         torch.as_tensor(fwd_meas),
-                        torch.as_tensor(p_adj_meas)) # NOTE: just gets rid of the last dimension by summing, might want to square and add together
+                        torch.as_tensor(p_adj_meas))
     p_grad_r = -k0 * torch.imag(p_phi) * delta_eps_r
     p_grad_i = +k0 * torch.real(p_phi) * delta_eps_i
 
+    # 2D gradient density wrt "local" mix (per unit area)
     grad_map_2d = (s_grad_r - s_grad_i + p_grad_r - p_grad_i).sum(dim=0) * dz  # (ny, nx)
 
-    grad_sum_in_rect = sum_inside_rect(
-        grad_map_2d=grad_map_2d, period=period, xy_points=xy_points, center=center, halfwidths=halfwidths, angle=angle
-    )
+    # integrate per square (row-major y,x) → (n,n) tensor
+    per_square = torch.zeros((n, n), dtype=torch.float32)
+    for (center, iy, ix) in centers:
+        g_sum = sum_inside_rect(
+            grad_map_2d=grad_map_2d, period=period, xy_points=xy_points,
+            center=center, halfwidths=halfwidths, angle=0.0
+        )
+        per_square[iy, ix] = g_sum
 
-    return grad_sum_in_rect
+    # Return as tensor [g00, g01, g10, g11] in row-major order (y then x)
+    return r, per_square
 
+# ------------------------ Run once: random 2x2 grating and print gradients ------------------------
 period = 1.
 ang_pol = 45
-step = 0.01
-i_vals = np.arange(0,1+step, step)
-grad_vals = []
-for val in tqdm(i_vals, desc='scanning gradient'):
-    gradient = grad_array(val, period, ang_pol, n_harm, .37, xy_points = 15, z_points = 40)
-    grad_vals.append(gradient)
+wl = .37
 
-correct_slopes = np.load("cleaned-tests/fom_slopes.npy")
-plt.plot(i_vals[:-1], correct_slopes, label="Correct slopes")
-plt.plot(i_vals, grad_vals, label = "Adjoint slopes")
-plt.show()
+# Random mixing coefficients in [0,1] for 2x2 squares (row-major: y then x)
+rng = np.random.default_rng()
+n=5
+mix_2x2 = rng.random((n,n))
+mix_2x2 = np.array(mix_2x2)
+
+for epoch in range(20):
+    print(f'Starting epoch {epoch+1}')
+    ref_pwr, grads = grad_array(mix_2x2, period, ang_pol, n_harm, wl, xy_points=30, z_points=40, tiles_per_side=n)
+    print("Mixing coefficients (2x2, rows are y, cols are x):")
+    print(mix_2x2)
+    print("Per-square gradients (row-major [g00, g01, g10, g11]):")
+    print(grads.numpy())
+    print("Power:")
+    print(ref_pwr)
+    mix_2x2 = mix_2x2 + grads.numpy().reshape(n,n)*.01
+    np.clip(mix_2x2, 0.0, 1.0, out=mix_2x2)

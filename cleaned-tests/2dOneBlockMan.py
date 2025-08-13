@@ -49,7 +49,7 @@ dx = mix_ratios[1] - mix_ratios[0]
 slopes = np.gradient(emission, dx)
 
 # (optional) save slopes to file, similar to your second script
-np.save("fom_slopes.npy", slopes)
+np.save("cleaned-tests/fom_slopes.npy", slopes)
 
 # Plot FOM (left) and gradient (right)
 plt.figure(figsize=(8, 4))

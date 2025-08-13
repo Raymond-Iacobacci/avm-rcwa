@@ -1,0 +1,1 @@
+Run the tests from the root directory, as ```python cleaned-tests/2dOneBlockMan.py``` and ```python cleaned-tests/2dOneBlockAdj.py```

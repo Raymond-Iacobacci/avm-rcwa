@@ -27,7 +27,7 @@ def reflected_power(mix_ratio, period, ang_pol, n_harm, wl):
 
     S.AddLayer(Name='VacuumAbove', Thickness=0.5, Material='Vac')
     S.AddLayer(Name='Grating',      Thickness=depth, Material='Vac')
-    S.SetRegionRectangle(Layer = 'Grating', Material = 'AlN', Center = (period/2, period/2), Halfwidths = (period/4, period/5), Angle = 0)
+    S.SetRegionRectangle(Layer = 'Grating', Material = 'AlN', Center = (period/4, period/2), Halfwidths = (period/4, period/5), Angle = 0)
     S.AddLayer(Name='VacuumBelow', Thickness=1, Material='W')
     S.SetFrequency(1.0 / wl)
 
@@ -37,7 +37,7 @@ def reflected_power(mix_ratio, period, ang_pol, n_harm, wl):
 
 emission = []
 period = 1.
-ang_pol = 90
+ang_pol = 45
 n_harm = 5
 wavelength = .370
 mix_ratios = np.linspace(0, 1, 100)

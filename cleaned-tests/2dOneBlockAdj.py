@@ -47,20 +47,15 @@ def rect_mask(period, xy_points, center, halfwidths, angle=0.0, wrap=False):
     eps = 1e-12
     return (np.abs(Xr) <= hx + eps) & (np.abs(Yr) <= hy + eps)
 
-
-
 def sum_inside_rect(grad_map_2d, period, xy_points, center, halfwidths, angle=0.0):
     """
     Integrate (sum) a 2D gradient density over the rectangle using midpoint areas.
     grad_map_2d shape: (ny, nx) — e.g., after summing over z and taking real part.
     """
     mask = rect_mask(period, xy_points, center, halfwidths, angle)
-    # print(f'Mask:\n{mask}')
-    # sys.exit(1)
     cell_area = (period / xy_points) ** 2
     g = torch.as_tensor(grad_map_2d).real
     return (g[mask] * cell_area).sum()
-
 
 def grad_array(mix_ratio, period, ang_pol, n_harm, wl, xy_points = 1, z_points = 1):
     assert n_harm%2 == 1
@@ -175,7 +170,7 @@ def grad_array(mix_ratio, period, ang_pol, n_harm, wl, xy_points = 1, z_points =
     return grad_sum_in_rect
 
 period = 1.
-ang_pol = 90
+ang_pol = 45
 step = 0.01
 i_vals = np.arange(0,1+step, step)
 grad_vals = []

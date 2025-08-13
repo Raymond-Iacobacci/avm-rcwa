@@ -227,14 +227,14 @@ n=5
 mix_2x2 = rng.random((n,n))
 mix_2x2 = np.array(mix_2x2)
 
-for epoch in range(20):
+for epoch in range(100):
     print(f'Starting epoch {epoch+1}')
     ref_pwr, grads = grad_array(mix_2x2, period, ang_pol, n_harm, wl, xy_points=30, z_points=40, tiles_per_side=n)
-    print("Mixing coefficients (2x2, rows are y, cols are x):")
+    print(f"Mixing coefficients ({n}x{n}, rows are y, cols are x):")
     print(mix_2x2)
     print("Per-square gradients (row-major [g00, g01, g10, g11]):")
     print(grads.numpy())
     print("Power:")
     print(ref_pwr)
-    mix_2x2 = mix_2x2 + grads.numpy().reshape(n,n)*.01
+    mix_2x2 = mix_2x2 + grads.numpy().reshape(n,n)*.01 - .001 * (1.0 - 2.0 * mix_2x2)
     np.clip(mix_2x2, 0.0, 1.0, out=mix_2x2)
